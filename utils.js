@@ -15,6 +15,14 @@ export function itemTier(o) {
     return 0
 }
 
+export function isLog(item) {
+    return item && item.displayName.includes("Log")
+}
+
+export function isStone(item) {
+    return item && (item.displayName.includes("Cobble") || item.displayName.includes("Stone"))
+}
+
 export function swingTime(o) {
     if (o == null) return 5
     const {displayName} = o

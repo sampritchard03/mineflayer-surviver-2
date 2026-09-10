@@ -1,21 +1,25 @@
 import pfr from "mineflayer-pathfinder"
 const {goals} = pfr
-import { swingTime, timeout } from "./utils.js"
+import { isStone, isLog, swingTime, timeout } from "./utils.js"
 
 export function mainTask(bot) {
-    let digTask = null
+    let toolsTask = null
+    let itemsTask = null
     let attackTask = null
 
     class MainTask extends Task {
         onStart() {
             attackTask = attackMobsTask(bot)
-            digTask = digBlockTask(bot, "Log", 10)
+            itemsTask = collectItemsTask(bot)
+            toolsTask = getStoneToolsTask(bot)
         };
 
         onTick() {
+            console.log(this.getHierarchy())
             if (attackTask.search()) return attackTask
-            if (digTask.isFinished()) digTask = digBlockTask(bot, "Log", 10)
-            return digTask
+            if (itemsTask.search()) return itemsTask
+            if (!toolsTask.isFinished()) return toolsTask
+            return null
         };
 
         // interruptTask = null if the task stopped cleanly
@@ -67,7 +71,6 @@ export function attackMobsTask(bot) {
                         new goals.GoalFollow(entity, this.attackRange+1)
                     ]))
                 }
-                console.log(attackTime, entity)
                 if (attackTime > swingTime(bot.inventory.sword()) && bot.entity.position.distanceTo(entity.position) < this.attackRange) {
                     attackTime = 0
                     this.equipSword(() => bot.attack(entity))
@@ -91,17 +94,244 @@ export function attackMobsTask(bot) {
     return new AttackMobsTask()
 }
 
-export function digBlockTask(bot, partialName, count) {
+export function placeCraftingTableTask(bot) {
+    var digWoodTask = null;
+    var craftingTable = null
+    var locked = false
+    const range = 3
+    class PlaceCraftingTableTask extends Task {
+        onStart() {
+            digWoodTask = digBlockTask(bot, isLog, 5)
+            locked = false
+        }
+
+        search() {
+            craftingTable = bot.findBlock({
+                matching: bot.registry.blocksByName.crafting_table.id,
+                maxDistance: range
+            })
+            return craftingTable
+        }
+
+        onTick() {
+            if (locked) return null
+
+            const id = bot.registry.itemsByName.crafting_table.id
+
+            const table = bot.inventory.getItem(i => i.type == id)
+        
+            if (table) {
+                bot.placeNearby(table).catch(e => console.error("PlaceCraftingTableTask: ", e))
+                return null
+            }
+            
+            const plan = bot.planCraftInventory({ id: id, count: 1 })
+
+            if (plan.status == "complete") {
+                locked = true
+                ;(async () => {
+                    for (const recipe of plan.recipesToDo) {
+                        await bot.craft(
+                            recipe.recipe,
+                            recipe.recipeApplications,
+                            null
+                        )
+                    }
+                })()
+                    .then(v => locked = false)
+                    .catch(e => {console.error("PlaceCraftingTableTask: ", e); locked = false})
+
+                return null
+            }
+
+            return digWoodTask
+        };
+
+        isFinished() {
+            return !!craftingTable
+        }
+
+        // interruptTask = null if the task stopped cleanly
+        onStop(interruptTask) {
+            
+        };
+
+        isEqual(other) {return other instanceof PlaceCraftingTableTask};
+    }
+
+    return new PlaceCraftingTableTask()
+}
+
+export function getStoneToolsTask(bot) {
+    var woodPickTask = null
+    var digWoodTask = null;
+    var digStoneTask = null
+    var craftingTableTask = null;
+    var locked
+    class GetStoneToolsTask extends Task {
+        
+        onStart() {
+            woodPickTask = getWoodPickTask(bot)
+            digWoodTask = digBlockTask(bot, isLog, 5)
+            digStoneTask = digBlockTask(bot, isStone, 12)
+            craftingTableTask = placeCraftingTableTask(bot)
+            locked = false
+        }
+
+        onTick() {
+            if (locked) return null
+
+            const items = bot.registry.itemsByName
+
+            const ids = [items.stone_pickaxe.id, items.stone_axe.id, items.stone_shovel.id, items.stone_sword.id]
+            const tools = ["pickaxe", "axe", "shovel", "sword"]
+
+            locked = false
+            ;(async () => {
+                for (let i = 0; i < ids.length; i++) {
+                    const tool = bot.inventory[tools[i]]()
+                    if (tool && tool.tier > 1) continue
+
+                    const id = ids[i]
+
+                    const plan = bot.planCraftInventory({ id: id, count: 1 })
+
+                    if (plan.status == "complete") {
+                        const craftingTable = craftingTableTask.search()
+                        if (!craftingTable) return craftingTableTask
+
+                        locked = true
+                        try {
+                            await bot.craftItem(id, 1, craftingTable)
+                        } catch(e) {
+                            console.error("GetStoneToolsTask:", e)
+                        }
+                        locked = false
+                    }
+                }
+            })().then(() => locked = false)
+
+            if (locked) return null
+
+            if (!digStoneTask.isFinished()) {
+                if (!bot.inventory.pickaxe()) return woodPickTask
+                return digStoneTask
+            }
+
+            return digWoodTask
+        };
+
+        isFinished() {
+            const tools = [bot.inventory.pickaxe(), bot.inventory.axe(), bot.inventory.shovel(), bot.inventory.sword()]
+            for (let tool of tools) if (tool == null || tool.tier < 2) return false
+            return true
+        }
+
+        // interruptTask = null if the task stopped cleanly
+        onStop(interruptTask) {
+
+        };
+
+        isEqual(other) {return other instanceof GetStoneToolsTask};
+    }
+
+    return new GetStoneToolsTask()
+}
+
+export function getWoodPickTask(bot) {
+    var digWoodTask = null;
+    var craftingTableTask = null;
+    var locked
+    class GetWoodPickTask extends Task {
+        onStart() {
+            digWoodTask = digBlockTask(bot, isLog, 5)
+            craftingTableTask = placeCraftingTableTask(bot)
+            locked = false
+        }
+
+        onTick() {
+            if (locked) return null
+
+            const id = bot.registry.itemsByName.wooden_pickaxe.id
+            const plan = bot.planCraftInventory({ id: id, count: 1 })
+
+            if (plan.status == "complete") {
+                const craftingTable = craftingTableTask.search()
+                if (!craftingTable) return craftingTableTask
+
+                locked = true
+                bot.craftItem(id, 1, craftingTable)
+                    .then(v => locked = false)
+                    .catch(e => {console.error("GetPickTask: ", e); locked = false})
+
+                return null
+            }
+
+            return digWoodTask
+        };
+
+        isFinished() {
+            return bot.inventory.pickaxe() != null
+        }
+
+        // interruptTask = null if the task stopped cleanly
+        onStop(interruptTask) {
+
+        };
+
+        isEqual(other) {return other instanceof GetWoodPickTask};
+    }
+
+    return new GetWoodPickTask()
+}
+
+export function collectItemsTask(bot) {
+    var entity = null
+    class CollectItemsTask extends Task {
+        onStart() {
+            this.range = 10
+            entity = null
+        }
+
+        search() {
+            entity = Object.values(bot.entities).filter(e => e.position && e.position.distanceTo(bot.entity.position) < this.range && bot.survival.isItemNeeded(e.getDroppedItem()))[0]
+            return entity
+        }
+
+        onTick() {
+            if (!(bot.pathfinder.goal instanceof goals.GoalFollow) || bot.pathfinder.goal.entity != entity) {
+                bot.pathfinder.setGoal(new goals.GoalFollow(entity, 0))
+            }
+            return null
+        };
+
+        isFinished() {
+            return !entity
+        }
+
+        // interruptTask = null if the task stopped cleanly
+        onStop(interruptTask) {
+            bot.pathfinder.stop()
+        };
+
+        isEqual(other) {return other instanceof CollectItemsTask};
+    }
+
+    return new CollectItemsTask()
+}
+
+export function digBlockTask(bot, pred=(item)=>false, count) {
+    var t = 0
     class DigBlockTask extends Task {
 
         constructor() {
             super()
-            this.partialName = partialName
+            this.pred = pred
             this.count = count
         }
 
         onStart() {
-            this.initialCount = bot.inventory.getCount(partialName)
+
         }
 
         equipBestTool(b, cb) {
@@ -114,31 +344,28 @@ export function digBlockTask(bot, partialName, count) {
         }
 
         onTick() {
-            const e = Object.values(bot.entities).filter(e => e.getDroppedItem()?.displayName.includes(partialName))[0]
-            if (e) {
-                if (!(bot.pathfinder.goal instanceof goals.GoalFollow) || bot.pathfinder.goal.entity != e) {
-                    bot.pathfinder.setGoal(new goals.GoalFollow(e, 0))
-                }
-                return null
-            }
 
-            const p = bot.findBlocks({matching:block=>block.displayName.includes(partialName)})[0]
-            if (bot.entity.position.offset(0, 1.6, 0).distanceTo(p) < 3 && !bot.targetDigBlock) {
+            const p = bot.findBlocks({matching:pred, maxDistance:32})[0]
+            if (bot.entity.position.distanceTo(p) < 3 && !bot.targetDigBlock) {
                 const b = bot.blockAt(p)
                 this.equipBestTool(b, () => bot.dig(b, true).catch(e => {}))
-                
                 
                 return null
             }
             
-            if (!(bot.pathfinder.goal instanceof goals.GoalLookAtBlock) || bot.pathfinder.goal.pos.distanceTo(p) > 1) {
-                bot.pathfinder.setGoal(new goals.GoalLookAtBlock(p, bot.world, {reach:2}))
+            if (
+                !(bot.pathfinder.goal instanceof goals.GoalGetToBlock) ||
+                bot.pathfinder.goal.x != p.x ||
+                bot.pathfinder.goal.y != p.y ||
+                bot.pathfinder.goal.z != p.z
+            ) {
+                bot.pathfinder.setGoal(new goals.GoalGetToBlock(p.x, p.y, p.z))
             }
             return null
         };
 
         isFinished() {
-            return bot.inventory.getCount(partialName) >= this.initialCount + count
+            return bot.inventory.getCount(pred) >= count
         }
 
         // interruptTask = null if the task stopped cleanly
@@ -147,9 +374,7 @@ export function digBlockTask(bot, partialName, count) {
             bot.stopDigging()
         };
 
-        isEqual(other) {return other instanceof DigBlockTask && other.partialName == partialName && other.count == count};
-
-        toDebugString() {return "DigBlockTask"};
+        isEqual(other) {return other instanceof DigBlockTask && other.pred == pred && other.count == count};
     }
 
     return new DigBlockTask()
@@ -168,7 +393,6 @@ class Task {
     isEqual(other) {return false};
 
     isFinished() {return false}
-
 
     sub = null;
 
@@ -209,7 +433,7 @@ class Task {
             // We are null
             if (this.sub != null && this.sub.isFinished()) {
                 // Our previous sub must be interrupted.
-                this.sub.stop(mod);
+                this.sub.stop();
                 this.sub = null;
             }
         }
@@ -237,7 +461,7 @@ class Task {
         }
         
 
-        if (this.sub != null && !this.sub.stopped()) {
+        if (this.sub != null && !this.sub.stopped) {
             this.sub.stop(interruptTask);
         }
 
@@ -259,7 +483,7 @@ class Task {
             onStop(interruptTask);
         }
 
-        if (this.sub != null && !this.sub.stopped()) {
+        if (this.sub != null && !this.sub.stopped) {
             this.sub.interrupt(interruptTask);
         }
 
@@ -268,6 +492,16 @@ class Task {
 
     toString() {
         return this.constructor.name;
+    }
+
+    getHierarchy() {
+        const hierarchy = [this.constructor.name]
+        let task = this.sub
+        while (task != null) {
+            hierarchy.push(task.constructor.name)
+            task = task.sub
+        }
+        return hierarchy.join(" -> ")
     }
 
     equals(obj) {
