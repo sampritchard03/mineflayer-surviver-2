@@ -139,18 +139,16 @@ export const plugin = (bot) => {
         return bot.world.raycast(eyePosition, direction.normalize(), distance) == null
     }
 
-    var t = 0
+    var tP = 0
 
     bot.on("physicsTick", () => {
         if (!bot.pathfinder.goal && bot.isInWater()) bot.setControlState("jump", true)
-        if (t % 40 == 0) {
-            if (!bot.pathfinder.isMining()) bot.pathfinder.stop()
-        }
-        if (t % 220 == 0) {
-            if (bot.targetDigBlock) bot.stopDigging()
+        if (tP >= 100 && !bot.pathfinder.isMining()) {
+            bot.pathfinder.stop()
+            tP = 0
         }
         if (task) task.tick()
-        t++
+        tP++
     })
 
 }
