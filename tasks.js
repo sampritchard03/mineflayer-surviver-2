@@ -2,6 +2,31 @@ import pfr from "mineflayer-pathfinder"
 const {goals} = pfr
 import { isStone, isLog, swingTime, timeout, isDirt, itemTier, isCreeperExploding, isGoodRawFood, isGoodCookedFood, shouldHunt } from "./utils.js"
 
+function getClosestDist(tasks) {
+    var closestDist = Infinity
+    for (let task of tasks) {
+        if (!task.isFinished()) {
+            const h = task.distanceTo()
+            if (h < closestDist) closestDist = h
+        } 
+    }
+    return closestDist
+}
+
+function getClosestTask(tasks) {
+    var closestTask = null
+    var closestDist = Infinity
+    for (let task of tasks) {
+        if (!task.isFinished()) {
+            const h = task.distanceTo()
+            if (h < closestDist) {
+                closestTask = task
+            }
+        } 
+    }
+    return closestTask
+}
+
 export function mainTask(bot) {
     let attackTask = attackMobsTask(bot)
     let itemsTask = collectItemsTask(bot)
@@ -57,6 +82,7 @@ export function mainTask(bot) {
 export function huntTask(bot, count) {
     var entity = null
     var attackTime = 0
+    const foodFactor = 3
     const reach = 4
     class HuntTask extends Task {
         onStart() {
@@ -74,6 +100,10 @@ export function huntTask(bot, count) {
                 return
             }
             bot.equip(sword).then(cb)
+        }
+
+        distanceTo(p=bot.entity.position) {
+            return bot.entity.position.distanceTo(p) / foodFactor
         }
 
         onTick() {
@@ -112,7 +142,9 @@ export function huntTask(bot, count) {
 
 export function earlyProgressionTask(bot) {
     var getStoneTools = getStoneToolsTask(bot)
-    var hunt = huntTask(bot, 64)
+    var hunt = huntTask(bot, 24)
+    const tasks = [getStoneTools, hunt]
+
     class EarlyProgressionTask extends Task {
         onStart() {
 
@@ -122,13 +154,12 @@ export function earlyProgressionTask(bot) {
             hunt.search()
         }
 
+        distanceTo() {
+            return getClosestDist(tasks)
+        }
+
         onTick() {
-            if (getStoneTools.shouldContinue()) return getStoneTools
-
-            if (!hunt.isFinished()) return hunt
-
-            if (!getStoneTools.isFinished()) return getStoneTools
-            return null
+            return getClosestTask(tasks)
         };
 
         // interruptTask = null if the task stopped cleanly
@@ -228,6 +259,7 @@ export function attackMobsTask(bot) {
 
 export function placeCraftingTableTask(bot) {
     var digWoodTask = null;
+    const tasks = [digWoodTask]
     var craftingTable = null
     var locked = false
     const range = 4
@@ -236,6 +268,10 @@ export function placeCraftingTableTask(bot) {
         onStart() {
             digWoodTask = digBlockTask(bot, isLog, 16)
             locked = false
+        }
+
+        distanceTo() {
+            return getClosestDist(tasks)
         }
 
         search() {
@@ -318,20 +354,21 @@ export function placeCraftingTableTask(bot) {
 }
 
 export function getStoneToolsTask(bot) {
-    var woodPickTask = null
-    var digWoodTask = null;
-    var digStoneTask = null
-    var craftingTableTask = null;
+    var woodPickTask = getWoodPickTask(bot)
+    var digWoodTask = digBlockTask(bot, isLog, 16, "Wood")
+    var digStoneTask = digBlockTask(bot, isStone, 16, "Stone")
+    var craftingTableTask = placeCraftingTableTask(bot)
+    const tasks = [woodPickTask, digWoodTask, digStoneTask, craftingTableTask]
     var needsCraftingTable = false
-    var locked
+    var locked = false
     class GetStoneToolsTask extends Task {
         
         onStart() {
-            woodPickTask = getWoodPickTask(bot)
-            digWoodTask = digBlockTask(bot, isLog, 16, "Wood")
-            digStoneTask = digBlockTask(bot, isStone, 16, "Stone")
-            craftingTableTask = placeCraftingTableTask(bot)
             locked = false
+        }
+
+        distanceTo() {
+            return getClosestDist(tasks)
         }
 
         onTick() {
@@ -409,14 +446,18 @@ export function getStoneToolsTask(bot) {
 }
 
 export function getWoodPickTask(bot) {
-    var digWoodTask = null;
-    var craftingTableTask = null;
-    var locked
+    var digWoodTask = digBlockTask(bot, isLog, 16, "Wood")
+    var craftingTableTask = placeCraftingTableTask(bot)
+    const tasks = [digWoodTask, craftingTableTask]
+    var locked = false
     class GetWoodPickTask extends Task {
         onStart() {
-            digWoodTask = digBlockTask(bot, isLog, 16, "Wood")
-            craftingTableTask = placeCraftingTableTask(bot)
+            
             locked = false
+        }
+
+        distanceTo() {
+            return getClosestDist(tasks)
         }
 
         onTick() {
@@ -509,6 +550,10 @@ export function digBlockTask(bot, pred=(item)=>false, count, dStr="") {
             this.digging = false
         }
 
+        distanceTo() {
+            return bot.entity.position.distanceTo(blocks[0])
+        }
+
         onStart() {
             blocks = []
             currentCount = bot.inventory.getCount(pred)
@@ -524,7 +569,11 @@ export function digBlockTask(bot, pred=(item)=>false, count, dStr="") {
             currentCount = bot.inventory.getCount(pred)
             if (this.digging) return null
 
-            blocks = bot.findBlocks({matching:pred, maxDistance:32}).slice(0, count-currentCount)
+            blocks = bot.findBlocks({matching:pred, maxDistance:32}).sort((a, b) => {
+                const distanceA = bot.entity.position.distanceTo(a)
+                const distanceB = bot.entity.position.distanceTo(b)
+                return distanceA - distanceB // Closest first. Flip to (distanceB - distanceA) for farthest first.
+            }).slice(0, count-currentCount)
 
             const p = blocks[0]
             if (!p) {
@@ -681,6 +730,10 @@ class Task {
         }
 
         this.first = true;
+    }
+
+    distanceTo() {
+        return Infinity
     }
 
     toString() {
