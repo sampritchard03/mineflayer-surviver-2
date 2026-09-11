@@ -188,20 +188,12 @@ export function attackMobsTask(bot) {
             bot.equip(sword).then(cb)
         }
 
-        canSeeMob(mob) {
-            const eyePosition = bot.entity.position.offset(0, bot.entity.eyeHeight, 0)
-            const targetPosition = mob.position.offset(0, (mob.height || 1) / 2, 0)
-            const direction = targetPosition.clone().subtract(eyePosition)
-            const distance = eyePosition.distanceTo(targetPosition)
-            return bot.world.raycast(eyePosition, direction.normalize(), distance) == null
-        }
-
         search() {
             entities = bot.sortedEntities(e =>
                 e.kind == "Hostile mobs" &&
                 e.displayName != "Enderman" &&
                 e.position.distanceTo(bot.entity.position) < this.aggroRange(e) &&
-                (this.canSeeMob(e) || isCreeperExploding(e))
+                (bot.canSeeMob(e) || isCreeperExploding(e))
             )
         }
 

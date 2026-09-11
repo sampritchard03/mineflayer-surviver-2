@@ -126,10 +126,29 @@ export const plugin = (bot) => {
         return false
     }
 
+    bot.isInWater = () => {
+        const block = bot.blockAt(bot.entity.position);
+        return block && block.name === 'water';
+    }
+
+    bot.canSeeMob = (mob) => {
+        const eyePosition = bot.entity.position.offset(0, bot.entity.eyeHeight, 0)
+        const targetPosition = mob.position.offset(0, (mob.height || 1) / 2, 0)
+        const direction = targetPosition.clone().subtract(eyePosition)
+        const distance = eyePosition.distanceTo(targetPosition)
+        return bot.world.raycast(eyePosition, direction.normalize(), distance) == null
+    }
+
     var t = 0
 
     bot.on("physicsTick", () => {
-        if (t % 40 == 0 && !bot.pathfinder.isMining()) bot.pathfinder.stop()
+        if (!bot.pathfinder.goal && bot.isInWater()) bot.setControlState("jump", true)
+        if (t % 40 == 0) {
+            if (!bot.pathfinder.isMining()) bot.pathfinder.stop()
+        }
+        if (t % 220 == 0) {
+            if (bot.targetDigBlock) bot.stopDigging()
+        }
         if (task) task.tick()
         t++
     })

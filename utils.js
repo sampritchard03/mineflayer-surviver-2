@@ -38,8 +38,8 @@ export function shouldHunt(entity) {
         case "Cow":
         case "Chicken":
         case "Sheep":
-        case "Cod":
-        case "Salmon":
+        //case "Cod":
+        //case "Salmon":
             return true
     }
     return false

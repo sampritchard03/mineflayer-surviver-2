@@ -6,9 +6,8 @@ import mcData from "minecraft-data"
 
 const bot = createBot({
     username:"Bot",
-    version:"1.21.4"
+    version:"1.21.11"
 })
-
 
 
 bot.once("spawn", () => {

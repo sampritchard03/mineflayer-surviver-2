@@ -18,6 +18,7 @@ Bogged
 Breeze
 Wind Charge
 Camel
+Camel Husk
 Cat
 Cave Spider
 Cherry Boat
@@ -25,6 +26,7 @@ Cherry Boat with Chest
 Minecart with Chest
 Chicken
 Cod
+Copper Golem
 Minecart with Command Block
 Cow
 Creaking
@@ -54,6 +56,7 @@ Fox
 Frog
 Minecart with Furnace
 Ghast
+Happy Ghast
 Giant
 Glow Item Frame
 Glow Squid
@@ -78,10 +81,12 @@ Llama Spit
 Magma Cube
 Mangrove Boat
 Mangrove Boat with Chest
+Mannequin
 Marker
 Minecart
 Mooshroom
 Mule
+Nautilus
 Oak Boat
 Oak Boat with Chest
 Ocelot
@@ -90,6 +95,7 @@ Painting
 Pale Oak Boat
 Pale Oak Boat with Chest
 Panda
+Parched
 Parrot
 Phantom
 Pig
@@ -97,7 +103,8 @@ Piglin
 Piglin Brute
 Pillager
 Polar Bear
-Potion
+Splash Potion
+Lingering Potion
 Pufferfish
 Rabbit
 Ravager
@@ -143,6 +150,7 @@ Wolf
 Zoglin
 Zombie
 Zombie Horse
+Zombie Nautilus
 Zombie Villager
 Zombified Piglin
 Player
