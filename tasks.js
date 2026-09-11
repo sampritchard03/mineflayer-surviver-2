@@ -1,24 +1,43 @@
 import pfr from "mineflayer-pathfinder"
 const {goals} = pfr
-import { isStone, isLog, swingTime, timeout } from "./utils.js"
+import { isStone, isLog, swingTime, timeout, isDirt, itemTier, isCreeperExploding, isGoodRawFood, isGoodCookedFood, shouldHunt } from "./utils.js"
 
 export function mainTask(bot) {
-    let toolsTask = null
-    let itemsTask = null
-    let attackTask = null
+    let attackTask = attackMobsTask(bot)
+    let itemsTask = collectItemsTask(bot)
+    let currentTask = null
 
     class MainTask extends Task {
         onStart() {
-            attackTask = attackMobsTask(bot)
-            itemsTask = collectItemsTask(bot)
-            toolsTask = getStoneToolsTask(bot)
+
         };
 
-        onTick() {
-            console.log(this.getHierarchy())
-            if (attackTask.search()) return attackTask
-            if (itemsTask.search()) return itemsTask
-            if (!toolsTask.isFinished()) return toolsTask
+        search() {
+            attackTask.search()
+            itemsTask.search()
+            bot.survival.task?.search?.()
+        }
+
+        chooseTask() {
+            if (!attackTask.isFinished()) return attackTask
+            else if (!itemsTask.isFinished()) return itemsTask
+            else if (!bot.survival.task.isFinished()) return bot.survival.task
+            return null
+        }
+
+        onTick() { // with this system, all tasks think they are active. This affects shouldContinue().
+            this.search()
+
+            const task = this.chooseTask()
+            if (task != currentTask) {
+                if (currentTask) 
+                    currentTask.onStop(task)
+                currentTask = task
+            }
+            if (currentTask) {
+                console.log(currentTask.getHierarchy())
+                currentTask.tick()
+            }
             return null
         };
 
@@ -29,25 +48,24 @@ export function mainTask(bot) {
 
         isFinished() {return false}
 
-        isEqual(other) {return false};
+        isEqual(other) {return other instanceof MainTask};
     }
 
     return new MainTask()
 }
 
-export function attackMobsTask(bot) {
-    var attackTime = 0
+export function huntTask(bot, count) {
     var entity = null
-
-    class AttackMobsTask extends Task {
-        constructor(aggroRange=10, attackrange=4) {
-            super()
-            this.aggroRange = aggroRange
-            this.attackRange = attackrange
-        }
-
+    var attackTime = 0
+    const reach = 4
+    class HuntTask extends Task {
         onStart() {
+            entity = null
         };
+
+        search() {
+            entity = bot.sortedEntities(shouldHunt)[0]
+        }
 
         equipSword(cb) {
             const sword = bot.inventory.sword()
@@ -58,30 +76,152 @@ export function attackMobsTask(bot) {
             bot.equip(sword).then(cb)
         }
 
-        search() {
-            entity = Object.values(bot.entities).filter(e => e.kind == "Hostile mobs" && e.position.distanceTo(bot.entity.position) < this.aggroRange)[0]
-            return entity
-        }
-
         onTick() {
             if (entity) {
-                if (!(bot.pathfinder.goal instanceof goals.GoalCompositeAll) || bot.pathfinder.goal.goals[1].entity != entity) {
-                    bot.pathfinder.setGoal(new goals.GoalCompositeAll([
-                        new goals.GoalInvert(new goals.GoalFollow(entity, this.attackRange)),
-                        new goals.GoalFollow(entity, this.attackRange+1)
-                    ]))
-                }
-                if (attackTime > swingTime(bot.inventory.sword()) && bot.entity.position.distanceTo(entity.position) < this.attackRange) {
-                    attackTime = 0
-                    this.equipSword(() => bot.attack(entity))
+                if ((attackTime % swingTime(bot.inventory.sword()) == 0) && bot.entity.position.distanceTo(entity.position) < reach) {
+                    this.equipSword(() => {if (entity) bot.attack(entity)})
                     
                 }
+
+                if (!(bot.pathfinder.goal instanceof goals.GoalFollow) || bot.pathfinder.goal.entity != entity) {
+                    bot.pathfinder.setGoal(new goals.GoalFollow(entity, 0))
+                }
+
             }
             attackTime++
             return null
         };
 
-        isFinished() {return !entity}
+        // interruptTask = null if the task stopped cleanly
+        onStop(interruptTask) {
+            entity = null
+        };
+
+        isFinished() {return entity == null || !bot.inventory.sword() || bot.inventory.getCount(i => isGoodRawFood(i) || isGoodCookedFood(i)) >= count}
+
+        isEqual(other) {return other instanceof HuntTask && other.count == count};
+
+        debugString() {
+            if (!entity) return ""
+            return entity.displayName + ", " + bot.inventory.getCount(i => isGoodRawFood(i) || isGoodCookedFood(i)) + ", " + count
+        }
+    }
+
+    return new HuntTask()
+}
+
+export function earlyProgressionTask(bot) {
+    var getStoneTools = getStoneToolsTask(bot)
+    var hunt = huntTask(bot, 64)
+    class EarlyProgressionTask extends Task {
+        onStart() {
+
+        };
+
+        search() {
+            hunt.search()
+        }
+
+        onTick() {
+            if (getStoneTools.shouldContinue()) return getStoneTools
+
+            if (!hunt.isFinished()) return hunt
+
+            if (!getStoneTools.isFinished()) return getStoneTools
+            return null
+        };
+
+        // interruptTask = null if the task stopped cleanly
+        onStop(interruptTask) {
+            
+        };
+
+        isFinished() {return getStoneTools.isFinished() && hunt.isFinished()}
+
+        isEqual(other) {return other instanceof EarlyProgressionTask};
+    }
+
+    return new EarlyProgressionTask()
+}
+
+export function attackMobsTask(bot) {
+    var attackTime = 0
+    var entities = []
+    const reach = 4
+
+    class AttackMobsTask extends Task {
+        constructor() {
+            super()
+        }
+
+        onStart() {
+        };
+
+        attackRange(e) {
+            if (e.displayName == "Skeleton" || e.displayName == "Witch") return 0
+            if (isCreeperExploding(e)) return 20
+            return reach
+        }
+
+        aggroRange(e) {
+           if (e.displayName == "Skeleton" || isCreeperExploding(e)) return 20
+           return 10
+        }
+
+        getGoals() {
+            const ret = []
+            for (let e of entities) {
+                const r = this.attackRange(e)
+                
+                ret.push(new goals.GoalInvert(new goals.GoalFollow(e, r)))
+                ret.push(new goals.GoalFollow(e, r+2))
+            }
+            return ret
+        }
+
+        equipSword(cb) {
+            const sword = bot.inventory.sword()
+            if (!sword) {
+                cb()
+                return
+            }
+            bot.equip(sword).then(cb)
+        }
+
+        canSeeMob(mob) {
+            const eyePosition = bot.entity.position.offset(0, bot.entity.eyeHeight, 0)
+            const targetPosition = mob.position.offset(0, (mob.height || 1) / 2, 0)
+            const direction = targetPosition.clone().subtract(eyePosition)
+            const distance = eyePosition.distanceTo(targetPosition)
+            return bot.world.raycast(eyePosition, direction.normalize(), distance) == null
+        }
+
+        search() {
+            entities = bot.sortedEntities(e =>
+                e.kind == "Hostile mobs" &&
+                e.displayName != "Enderman" &&
+                e.position.distanceTo(bot.entity.position) < this.aggroRange(e) &&
+                (this.canSeeMob(e) || isCreeperExploding(e))
+            )
+        }
+
+        onTick() {
+            if (entities.length > 0) {
+                if ((attackTime % swingTime(bot.inventory.sword()) == 0 || attackTime % 4 == 0 && isCreeperExploding(entities[0])) && bot.entity.position.distanceTo(entities[0].position) < reach) {
+                    this.equipSword(() => {if (entities[0]) bot.attack(entities[0])})
+                    
+                }
+
+                if (!(bot.pathfinder.goal instanceof goals.GoalCompositeAll) || attackTime % 4 == 0) {
+                    bot.pathfinder.setGoal(new goals.GoalCompositeAll(this.getGoals()))
+                }
+
+            }
+            attackTime++
+            return null
+        };
+
+        isFinished() {return entities.length == 0}
 
         // interruptTask = null if the task stopped cleanly
         onStop(interruptTask) {
@@ -98,10 +238,11 @@ export function placeCraftingTableTask(bot) {
     var digWoodTask = null;
     var craftingTable = null
     var locked = false
-    const range = 3
+    const range = 4
+    const longRange = 16
     class PlaceCraftingTableTask extends Task {
         onStart() {
-            digWoodTask = digBlockTask(bot, isLog, 5)
+            digWoodTask = digBlockTask(bot, isLog, 16)
             locked = false
         }
 
@@ -116,12 +257,33 @@ export function placeCraftingTableTask(bot) {
         onTick() {
             if (locked) return null
 
+            const p = bot.findBlocks({
+                matching: bot.registry.blocksByName.crafting_table.id,
+                maxDistance: longRange
+            })[0]
+
+            if (p && (
+                !(bot.pathfinder.goal instanceof goals.GoalNear) ||
+                bot.pathfinder.goal.x != p.x ||
+                bot.pathfinder.goal.y != p.y ||
+                bot.pathfinder.goal.z != p.z
+            )) {
+                bot.pathfinder.setGoal(new goals.GoalNear(p.x, p.y, p.z, range-1))
+            }
+
+            if (p) return null
+
+            if (digWoodTask.shouldContinue()) return digWoodTask
+
             const id = bot.registry.itemsByName.crafting_table.id
 
             const table = bot.inventory.getItem(i => i.type == id)
         
             if (table) {
-                bot.placeNearby(table).catch(e => console.error("PlaceCraftingTableTask: ", e))
+                locked = true
+                bot.placeNearby(table)
+                    .catch(e => console.error("PlaceCraftingTableTask: ", e))
+                    .finally(() => locked = false)
                 return null
             }
             
@@ -138,13 +300,14 @@ export function placeCraftingTableTask(bot) {
                         )
                     }
                 })()
-                    .then(v => locked = false)
-                    .catch(e => {console.error("PlaceCraftingTableTask: ", e); locked = false})
+                    .catch(e => console.error("PlaceCraftingTableTask: ", e))
+                    .finally(() => locked = false)
 
                 return null
             }
 
-            return digWoodTask
+            if (!digWoodTask.isFinished()) return digWoodTask
+            return null
         };
 
         isFinished() {
@@ -167,19 +330,27 @@ export function getStoneToolsTask(bot) {
     var digWoodTask = null;
     var digStoneTask = null
     var craftingTableTask = null;
+    var needsCraftingTable = false
     var locked
     class GetStoneToolsTask extends Task {
         
         onStart() {
             woodPickTask = getWoodPickTask(bot)
-            digWoodTask = digBlockTask(bot, isLog, 5)
-            digStoneTask = digBlockTask(bot, isStone, 12)
+            digWoodTask = digBlockTask(bot, isLog, 16, "Wood")
+            digStoneTask = digBlockTask(bot, isStone, 16, "Stone")
             craftingTableTask = placeCraftingTableTask(bot)
             locked = false
         }
 
         onTick() {
             if (locked) return null
+            if (needsCraftingTable || craftingTableTask.shouldContinue()) {
+                needsCraftingTable = false
+                craftingTableTask.search()
+                return craftingTableTask
+            }
+            if (digWoodTask.shouldContinue()) return digWoodTask
+            if (digStoneTask.shouldContinue()) return digStoneTask
 
             const items = bot.registry.itemsByName
 
@@ -190,7 +361,7 @@ export function getStoneToolsTask(bot) {
             ;(async () => {
                 for (let i = 0; i < ids.length; i++) {
                     const tool = bot.inventory[tools[i]]()
-                    if (tool && tool.tier > 1) continue
+                    if (tool && itemTier(tool) > 1) continue
 
                     const id = ids[i]
 
@@ -198,7 +369,7 @@ export function getStoneToolsTask(bot) {
 
                     if (plan.status == "complete") {
                         const craftingTable = craftingTableTask.search()
-                        if (!craftingTable) return craftingTableTask
+                        if (!craftingTable) return true
 
                         locked = true
                         try {
@@ -209,7 +380,11 @@ export function getStoneToolsTask(bot) {
                         locked = false
                     }
                 }
-            })().then(() => locked = false)
+                return false
+            })().then(b => {
+                locked = false
+                needsCraftingTable = b
+            })
 
             if (locked) return null
 
@@ -218,7 +393,10 @@ export function getStoneToolsTask(bot) {
                 return digStoneTask
             }
 
-            return digWoodTask
+            if (!digWoodTask.isFinished())
+                return digWoodTask
+
+            return null
         };
 
         isFinished() {
@@ -244,13 +422,14 @@ export function getWoodPickTask(bot) {
     var locked
     class GetWoodPickTask extends Task {
         onStart() {
-            digWoodTask = digBlockTask(bot, isLog, 5)
+            digWoodTask = digBlockTask(bot, isLog, 16, "Wood")
             craftingTableTask = placeCraftingTableTask(bot)
             locked = false
         }
 
         onTick() {
             if (locked) return null
+            if (digWoodTask.shouldContinue()) return digWoodTask
 
             const id = bot.registry.itemsByName.wooden_pickaxe.id
             const plan = bot.planCraftInventory({ id: id, count: 1 })
@@ -288,13 +467,17 @@ export function getWoodPickTask(bot) {
 export function collectItemsTask(bot) {
     var entity = null
     class CollectItemsTask extends Task {
-        onStart() {
+        constructor() {
+            super()
             this.range = 10
-            entity = null
         }
 
         search() {
-            entity = Object.values(bot.entities).filter(e => e.position && e.position.distanceTo(bot.entity.position) < this.range && bot.survival.isItemNeeded(e.getDroppedItem()))[0]
+            entity = bot.sortedEntities(e => {
+                const item = e.getDroppedItem?.()
+                const d = e.position.distanceTo(bot.entity.position)
+                return item && e.position && d < this.range && bot.survival.isItemNeeded(item)
+            })[0]
             return entity
         }
 
@@ -320,35 +503,50 @@ export function collectItemsTask(bot) {
     return new CollectItemsTask()
 }
 
-export function digBlockTask(bot, pred=(item)=>false, count) {
-    var t = 0
+export function digBlockTask(bot, pred=(item)=>false, count, dStr="") {
+    var blocks = []
+    var currentCount = null
+    const wander = new goals.GoalNearXZ(30000000, 30000000, 0)
+    count = Number(count)
     class DigBlockTask extends Task {
 
         constructor() {
             super()
             this.pred = pred
             this.count = count
+            this.digging = false
         }
 
         onStart() {
-
+            blocks = []
+            currentCount = bot.inventory.getCount(pred)
         }
 
-        equipBestTool(b, cb) {
+        async digWithBestTool(b) {
             const tool = bot.pathfinder.bestHarvestTool(b)
-            if (!tool) {
-                cb()
-                return
-            }
-            bot.equip(tool).then(cb)
+            if (tool) await bot.equip(tool, "hand")
+            await bot.dig(b, true)
         }
 
         onTick() {
+            currentCount = bot.inventory.getCount(pred)
+            if (this.digging) return null
 
-            const p = bot.findBlocks({matching:pred, maxDistance:32})[0]
-            if (bot.entity.position.distanceTo(p) < 3 && !bot.targetDigBlock) {
+            blocks = bot.findBlocks({matching:pred, maxDistance:32}).slice(0, count-currentCount)
+
+            const p = blocks[0]
+            if (!p) {
+                console.error("No blocks found!")
+                bot.pathfinder.setGoal(wander)
+
+                return null
+            }
+            if (bot.entity.position.distanceTo(p) < 3 && !bot.targetDigBlock && !this.digging) {
                 const b = bot.blockAt(p)
-                this.equipBestTool(b, () => bot.dig(b, true).catch(e => {}))
+                this.digging = true
+                this.digWithBestTool(b)
+                    .catch(e => {})
+                    .finally(() => { this.digging = false })
                 
                 return null
             }
@@ -364,22 +562,23 @@ export function digBlockTask(bot, pred=(item)=>false, count) {
             return null
         };
 
-        isFinished() {
-            return bot.inventory.getCount(pred) >= count
-        }
-
         // interruptTask = null if the task stopped cleanly
         onStop(interruptTask) {
             bot.pathfinder.stop()
             bot.stopDigging()
         };
 
+        isFinished() {
+            return currentCount >= count
+        }
+
         isEqual(other) {return other instanceof DigBlockTask && other.pred == pred && other.count == count};
+
+        debugString() {return dStr+", "+bot.inventory.getCount(pred)+", "+count}
     }
 
     return new DigBlockTask()
 }
-
 
 class Task {
 
@@ -393,6 +592,8 @@ class Task {
     isEqual(other) {return false};
 
     isFinished() {return false}
+
+    debugString() {return ""}
 
     sub = null;
 
@@ -498,7 +699,7 @@ class Task {
         const hierarchy = [this.constructor.name]
         let task = this.sub
         while (task != null) {
-            hierarchy.push(task.constructor.name)
+            hierarchy.push(task.constructor.name+" "+task.debugString())
             task = task.sub
         }
         return hierarchy.join(" -> ")
@@ -515,5 +716,9 @@ class Task {
             t = t._sub;
         }
         return false;
+    }
+
+    shouldContinue() {
+        return !this.isFinished() && this.active
     }
 }

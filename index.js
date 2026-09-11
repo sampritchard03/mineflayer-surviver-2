@@ -1,4 +1,4 @@
-import {digBlockTask, placeCraftingTableTask, collectItemsTask, getWoodPickTask, getStoneToolsTask, attackMobsTask, mainTask} from "./tasks.js"
+import {digBlockTask, placeCraftingTableTask, collectItemsTask, getWoodPickTask, getStoneToolsTask, attackMobsTask, earlyProgressionTask, mainTask} from "./tasks.js"
 import { itemTier } from "./utils.js"
 import pfr from "mineflayer-pathfinder"
 const {pathfinder, goals, Movements} = pfr
@@ -13,6 +13,7 @@ export const tasks = {
     getWoodPickTask,
     getStoneToolsTask,
     attackMobsTask,
+    earlyProgressionTask,
     mainTask
 }
 
@@ -23,11 +24,12 @@ export const plugin = (bot) => {
     bot.pathfinder.setMovements(movements)
     bot.loadPlugin(craftingUtil())
 
-    var task = null
-    
+    const task = mainTask(bot)
+
     bot.survival = {
+        task: null,
         loadTask: (t) => {
-            task = t
+            bot.survival.task = t
         },
         isItemNeeded: (item) => true
     }
@@ -62,10 +64,29 @@ export const plugin = (bot) => {
             if (pred(item)) return item
     }
 
-    bot.inventory.sword = () => {const ret = tool("Sword"); if (ret) ret.tier = itemTier(ret); return ret}
-    bot.inventory.axe = () => {const ret = tool("Axe"); if (ret) ret.tier = itemTier(ret); return ret}
-    bot.inventory.shovel = () => {const ret = tool("Shovel"); if (ret) ret.tier = itemTier(ret); return ret}
-    bot.inventory.pickaxe = () => {const ret = tool("Pickaxe"); if (ret) ret.tier = itemTier(ret); return ret}
+    bot.inventory.sword = () => {const ret = tool("Sword"); return ret}
+    bot.inventory.axe = () => {const ret = tool("Axe"); return ret}
+    bot.inventory.shovel = () => {const ret = tool("Shovel"); return ret}
+    bot.inventory.pickaxe = () => {const ret = tool("Pickaxe"); return ret}
+
+    bot.sortedEntities = (pred=(e)=>true) => {
+        const ret = Object.values(bot.entities).filter(pred)
+        for (let end = ret.length - 1; end > 0; end--) {
+            let swapped = false
+            for (let i = 0; i < end; i++) {
+                const currentDistance = ret[i].position.distanceTo(bot.entity.position)
+                const nextDistance = ret[i + 1].position.distanceTo(bot.entity.position)
+                if (currentDistance > nextDistance) {
+                    const current = ret[i]
+                    ret[i] = ret[i + 1]
+                    ret[i + 1] = current
+                    swapped = true
+                }
+            }
+            if (!swapped) break
+        }
+        return ret
+    }
 
     bot.placeNearby = async (item, range=2) => {
         const block = item && bot.registry.blocksByName[item.name]
@@ -83,7 +104,7 @@ export const plugin = (bot) => {
             {offset: new Vec3(0, 0, -1), face: new Vec3(0, 0, -1)}
         ]
 
-        for (let attempt = 0; attempt < 20; attempt++) {
+        for (let attempt = 0; attempt < 200; attempt++) {
             const target = origin.offset(
                 Math.floor(Math.random() * (range * 2 + 1)) - range,
                 Math.floor(Math.random() * (range * 2 + 1)) - range,
@@ -105,8 +126,12 @@ export const plugin = (bot) => {
         return false
     }
 
+    var t = 0
+
     bot.on("physicsTick", () => {
+        if (t % 40 == 0 && !bot.pathfinder.isMining()) bot.pathfinder.stop()
         if (task) task.tick()
+        t++
     })
 
 }

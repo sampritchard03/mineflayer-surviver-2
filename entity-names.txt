@@ -1,0 +1,149 @@
+Acacia Boat
+Acacia Boat with Chest
+Allay
+Area Effect Cloud
+Armadillo
+Armor Stand
+Arrow
+Axolotl
+Bamboo Raft with Chest
+Bamboo Raft
+Bat
+Bee
+Birch Boat
+Birch Boat with Chest
+Blaze
+Block Display
+Bogged
+Breeze
+Wind Charge
+Camel
+Cat
+Cave Spider
+Cherry Boat
+Cherry Boat with Chest
+Minecart with Chest
+Chicken
+Cod
+Minecart with Command Block
+Cow
+Creaking
+Creeper
+Dark Oak Boat
+Dark Oak Boat with Chest
+Dolphin
+Donkey
+Dragon Fireball
+Drowned
+Thrown Egg
+Elder Guardian
+Enderman
+Endermite
+Ender Dragon
+Thrown Ender Pearl
+End Crystal
+Evoker
+Evoker Fangs
+Thrown Bottle o' Enchanting
+Experience Orb
+Eye of Ender
+Falling Block
+Fireball
+Firework Rocket
+Fox
+Frog
+Minecart with Furnace
+Ghast
+Giant
+Glow Item Frame
+Glow Squid
+Goat
+Guardian
+Hoglin
+Minecart with Hopper
+Horse
+Husk
+Illusioner
+Interaction
+Iron Golem
+Item
+Item Display
+Item Frame
+Jungle Boat
+Jungle Boat with Chest
+Leash Knot
+Lightning Bolt
+Llama
+Llama Spit
+Magma Cube
+Mangrove Boat
+Mangrove Boat with Chest
+Marker
+Minecart
+Mooshroom
+Mule
+Oak Boat
+Oak Boat with Chest
+Ocelot
+Ominous Item Spawner
+Painting
+Pale Oak Boat
+Pale Oak Boat with Chest
+Panda
+Parrot
+Phantom
+Pig
+Piglin
+Piglin Brute
+Pillager
+Polar Bear
+Potion
+Pufferfish
+Rabbit
+Ravager
+Salmon
+Sheep
+Shulker
+Shulker Bullet
+Silverfish
+Skeleton
+Skeleton Horse
+Slime
+Small Fireball
+Sniffer
+Snowball
+Snow Golem
+Minecart with Monster Spawner
+Spectral Arrow
+Spider
+Spruce Boat
+Spruce Boat with Chest
+Squid
+Stray
+Strider
+Tadpole
+Text Display
+Primed TNT
+Minecart with TNT
+Trader Llama
+Trident
+Tropical Fish
+Turtle
+Vex
+Villager
+Vindicator
+Wandering Trader
+Warden
+Wind Charge
+Witch
+Wither
+Wither Skeleton
+Wither Skull
+Wolf
+Zoglin
+Zombie
+Zombie Horse
+Zombie Villager
+Zombified Piglin
+Player
+Fishing Bobber
