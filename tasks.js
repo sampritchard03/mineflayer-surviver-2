@@ -1,5 +1,6 @@
 import pfr from "mineflayer-pathfinder"
 const {goals} = pfr
+import {Vec3} from "vec3"
 import { isStone, isLog, swingTime, timeout, isDirt, itemTier, isCreeperExploding, isGoodRawFood, isGoodCookedFood, shouldHunt } from "./utils.js"
 
 function getClosestDist(tasks) {
@@ -47,6 +48,7 @@ export function mainTask(bot) {
     let attackTask = attackMobsTask(bot)
     let itemsTask = collectItemsTask(bot)
     let currentTask = null
+    let t = 0
 
     class MainTask extends Task {
         onStart() {
@@ -62,13 +64,11 @@ export function mainTask(bot) {
         chooseTask() {
             if (!attackTask.isFinished()) return attackTask
             else if (!itemsTask.isFinished()) return itemsTask
-            else if (!bot.survival.task.isFinished()) return bot.survival.task
+            else if (bot.survival.task && !bot.survival.task.isFinished()) return bot.survival.task
             return null
         }
 
         onTick() { // with this system, all tasks think they are active. This affects shouldContinue().
-            this.search()
-
             const task = this.chooseTask()
             if (task != currentTask) {
                 if (currentTask) 
@@ -79,6 +79,7 @@ export function mainTask(bot) {
                 console.log(currentTask.getHierarchy())
                 currentTask.tick()
             }
+            t++
             return null
         };
 
@@ -98,7 +99,7 @@ export function mainTask(bot) {
 export function huntTask(bot, count) {
     var entity = null
     var attackTime = 0
-    const reach = 4
+    const reach = 3
     class HuntTask extends Task {
         onStart() {
             entity = null
@@ -204,7 +205,18 @@ export function attackMobsTask(bot) {
     var entities = []
     var attackInProgress = false
     var goalKey = ""
-    const reach = 4
+    const reach = 3
+
+    const attackRange = (e) => {
+        if (e.displayName == "Skeleton" || e.displayName == "Witch") return 0
+        if (isCreeperExploding(e)) return 20
+        return reach
+    }
+
+    const aggroRange = (e) => {
+        if (e.displayName == "Skeleton" || isCreeperExploding(e)) return 20
+        return 10
+    }
 
     class AttackMobsTask extends Task {
         constructor() {
@@ -214,21 +226,10 @@ export function attackMobsTask(bot) {
         onStart() {
         };
 
-        attackRange(e) {
-            if (e.displayName == "Skeleton" || e.displayName == "Witch") return 0
-            if (isCreeperExploding(e)) return 20
-            return reach
-        }
-
-        aggroRange(e) {
-           if (e.displayName == "Skeleton" || isCreeperExploding(e)) return 20
-           return 10
-        }
-
         getGoals() {
             const ret = []
             for (let e of entities) {
-                const r = this.attackRange(e)
+                const r = attackRange(e)
                 
                 ret.push(new goals.GoalInvert(new goals.GoalFollow(e, r)))
                 ret.push(new goals.GoalFollow(e, r+2))
@@ -236,17 +237,17 @@ export function attackMobsTask(bot) {
             return ret
         }
 
-        equipSword(cb) {
+        attack(entity) {
             if (attackInProgress) return
 
             attackInProgress = true
-            const sword = bot.inventory.sword()
-            if (!sword) {
-                attackInProgress = false
-                return
-            }
-            bot.equip(sword)
-                .then(cb)
+
+            bot.lookAt(entity.position.offset(0, entity.height, 0), true)
+                .then(() => {
+                    const sword = bot.inventory.sword()
+                    if (!sword) bot.attack(entity)
+                    else bot.equip(sword, "hand").then(() => bot.attack(entity))
+                })
                 .catch(e => console.error("AttackMobsTask: ", e))
                 .finally(() => attackInProgress = false)
         }
@@ -255,7 +256,7 @@ export function attackMobsTask(bot) {
             entities = bot.sortedEntities(e =>
                 e.kind == "Hostile mobs" &&
                 e.displayName != "Enderman" &&
-                e.position.distanceTo(bot.entity.position) < this.aggroRange(e) &&
+                e.position.distanceTo(bot.entity.position) < aggroRange(e) &&
                 (bot.canSeeMob(e) || isCreeperExploding(e))
             )
             const nextGoalKey = entities.map(e => e.id).join(",")
@@ -264,8 +265,12 @@ export function attackMobsTask(bot) {
 
         onTick() {
             if (entities.length > 0) {
-                if (!attackInProgress && (attackTime % swingTime(bot.inventory.sword()) == 0 || attackTime % 4 == 0 && isCreeperExploding(entities[0])) && bot.entity.position.distanceTo(entities[0].position) < reach) {
-                    this.equipSword(() => {if (entities[0]) bot.attack(entities[0])})
+                if (
+                    !attackInProgress && 
+                    (attackTime % swingTime(bot.inventory.sword()) == 0 || attackTime % 4 == 0 && isCreeperExploding(entities[0])) && 
+                    bot.entity.position.distanceTo(entities[0].position) < reach+0.5
+                ) {
+                    this.attack(entities[0])
                     
                 }
 
@@ -297,7 +302,7 @@ export function placeCraftingTableTask(bot) {
     var digWoodTask = digBlockTask(bot, isLog, 1, "Wood")
     var craftingTable = null
     var locked = false
-    const reach = 4
+    const reach = 3
     class PlaceCraftingTableTask extends Task {
         onStart() {
             locked = false
@@ -388,10 +393,17 @@ export function placeCraftingTableTask(bot) {
     return new PlaceCraftingTableTask()
 }
 
+export function mineNearSurfaceTask(bot, pred, count, dStr) {
+    return digBlockTask(bot, (b) => {
+        if (!b.position) return pred(b)
+        return pred(b) && b.position.y >= 60
+    }, count, "NearSurface, "+dStr)
+}
+
 export function getStoneToolsTask(bot) {
     var digWoodTask = digBlockTask(bot, isLog, 6, "Wood")
     var woodPickTask = getWoodPickTask(bot)
-    var digStoneTask = digBlockTask(bot, isStone, 20, "Stone")
+    var digStoneTask = mineNearSurfaceTask(bot, isStone, 20, "Stone")
     var craftingTableTask = placeCraftingTableTask(bot)
     var needsCraftingTable = false
     var locked = false
@@ -427,7 +439,7 @@ export function getStoneToolsTask(bot) {
 
             if (digWoodTask.shouldContinue()) return digWoodTask
             if (woodPickTask.shouldContinue()) return woodPickTask
-            if (digStoneTask.shouldContinue()) return digStoneTask
+            else if (digStoneTask.shouldContinue()) return digStoneTask
 
             const items = bot.registry.itemsByName
 
@@ -492,6 +504,7 @@ export function getWoodPickTask(bot) {
     var locked = false
     var needsCraftingTable = false
     class GetWoodPickTask extends Task {
+
         onStart() {
             locked = false
         }
@@ -551,22 +564,22 @@ export function getWoodPickTask(bot) {
 
 export function collectItemsTask(bot) {
     var entity = null
+    const range = 10
     class CollectItemsTask extends Task {
         constructor() {
-            super()
-            this.range = 10
+            super(2)
         }
 
         search() {
             entity = bot.sortedEntities(e => {
                 const item = e.getDroppedItem?.()
                 const d = e.position.distanceTo(bot.entity.position)
-                return item && e.position && d < this.range && bot.survival.isItemNeeded(item)
+                return item && e.position && d < range && bot.survival.isItemNeeded(item)
             })[0]
-            return entity
         }
 
         onTick() {
+            if (!entity) return null
             if (!(bot.pathfinder.goal instanceof goals.GoalFollow) || bot.pathfinder.goal.entity != entity) {
                 bot.pathfinder.setGoal(new goals.GoalFollow(entity, 0))
             }
@@ -592,12 +605,14 @@ export function digBlockTask(bot, pred=(item)=>false, count, dStr="") {
     var blocks = []
     var currentCount = null
     var locked = false
+    const reach = 3
     const wander = new goals.GoalNearXZ(30000000, 30000000, 0)
+    var t = 0
     count = Number(count)
     class DigBlockTask extends Task {
 
         constructor() {
-            super()
+            super(4)
             this.pred = pred
             this.count = count
             locked = false
@@ -612,6 +627,7 @@ export function digBlockTask(bot, pred=(item)=>false, count, dStr="") {
         }   
 
         distanceTo() {
+            if (locked) return 0
             return blocks.length ? bot.entity.position.distanceTo(blocks[0]) : Infinity
         }
 
@@ -620,13 +636,22 @@ export function digBlockTask(bot, pred=(item)=>false, count, dStr="") {
             currentCount = bot.inventory.getCount(pred)
         }
 
-        async digWithBestTool(b) {
-            const tool = bot.pathfinder.bestHarvestTool(b)
-            if (tool) await bot.equip(tool, "hand")
-            await bot.dig(b, true)
+        async digWithBestTool(p) {
+            await bot.lookAt(p)
+            var b1 = bot.blockAtCursor(reach)
+            do {
+                if (!b1) b1 = bot.blockAt(p)
+                const tool = bot.pathfinder.bestHarvestTool(b1)
+                if (tool) await bot.equip(tool, "hand")
+                await bot.dig(b1, true, "raycast")
+                await bot.lookAt(b.position)
+                b1 = bot.blockAtCursor(reach)
+            } while (p != b1.position)
         }
 
         onTick() {
+            t++
+
             currentCount = bot.inventory.getCount(pred)
             if (locked) {
                 bot.setControlState("jump", false)
@@ -636,15 +661,21 @@ export function digBlockTask(bot, pred=(item)=>false, count, dStr="") {
 
             const p = blocks[0]
             if (!p) {
-                console.error("No blocks found!")
-                bot.pathfinder.setGoal(wander)
+                if (t > 20) {
+                    console.error("No blocks found!")
+                    bot.pathfinder.setGoal(wander)
+                    t = 0
+                }
 
                 return null
             }
-            if (bot.entity.position.distanceTo(p) < 3 && !bot.targetDigBlock) {
-                const b = bot.blockAt(p)
+            
+            const eyePosition = bot.entity.position.offset(0, bot.entity.eyeHeight, 0)
+            const blockCenter = p.offset(0.5, 0.5, 0.5)
+            if (eyePosition.distanceTo(blockCenter) <= reach && !bot.targetDigBlock) {
+                bot.pathfinder.stop()
                 locked = true
-                this.digWithBestTool(b)
+                this.digWithBestTool(p)
                     .catch(e => {})
                     .finally(() => { locked = false })
                 
@@ -681,6 +712,8 @@ export function digBlockTask(bot, pred=(item)=>false, count, dStr="") {
     return new DigBlockTask()
 }
 
+var totalTaskCount = 0
+
 class Task {
 
     onStart() {};
@@ -695,6 +728,8 @@ class Task {
     isFinished() {return false}
 
     debugString() {return ""}
+    
+    search() {}
 
     sub = null;
 
@@ -704,9 +739,30 @@ class Task {
 
     active = false;
 
+    nestedSearch = false
+
+    alreadySearched = false
+
+    t = 0
+
+    index = 0
+
+    constructor() {
+        this.index = totalTaskCount++
+    }
+
     cancel() {}
 
     tick() {
+        if (!this.nestedSearch) {
+            this.nestedSearch = true
+            const search = this.search
+            this.search = () => {
+                this.alreadySearched = true
+                search()
+            }
+        }
+
         if (this.first) {
             //Debug.logInternal("Task START: " + this);
             this.active = true;
@@ -716,6 +772,14 @@ class Task {
         }
         if (this.stopped) return;
 
+        if ((this.t+this.index-1) % 10 == 0) {
+            this.alreadySearched = false
+        }
+
+        if ((this.t+this.index) % 10 == 0) {
+            if (!this.alreadySearched) this.search()
+        }
+        
         const newSub = this.onTick();
         // We have a sub task
         if (newSub != null) {
@@ -739,6 +803,7 @@ class Task {
                 this.sub = null;
             }
         }
+        this.t++
     }
 
     reset() {
@@ -747,14 +812,10 @@ class Task {
         this.stopped = false;
     }
 
-    stop() {
-        stop(null);
-    }
-
     /**
      * Stops the task. Next time it's run it will run `onStart`
      */
-    stop(interruptTask) {
+    stop(interruptTask=null) {
         if (!this.active) return;
         //Debug.logInternal("Task STOP: " + this + ", interrupted by " + interruptTask);
 

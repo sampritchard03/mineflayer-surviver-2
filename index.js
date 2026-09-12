@@ -21,6 +21,8 @@ export const plugin = (bot) => {
     bot.loadPlugin(pathfinder)
     const movements = new Movements(bot)
     movements.scafoldingBlocks = [bot.registry.itemsByName.dirt.id]
+    movements.allowSprinting = true
+    movements.allowFreeMotion = true
     bot.pathfinder.setMovements(movements)
     bot.loadPlugin(craftingUtil())
 
@@ -70,22 +72,15 @@ export const plugin = (bot) => {
     bot.inventory.pickaxe = () => {const ret = tool("Pickaxe"); return ret}
 
     bot.sortedEntities = (pred=(e)=>true) => {
-        const ret = Object.values(bot.entities).filter(pred)
-        for (let end = ret.length - 1; end > 0; end--) {
-            let swapped = false
-            for (let i = 0; i < end; i++) {
-                const currentDistance = ret[i].position.distanceTo(bot.entity.position)
-                const nextDistance = ret[i + 1].position.distanceTo(bot.entity.position)
-                if (currentDistance > nextDistance) {
-                    const current = ret[i]
-                    ret[i] = ret[i + 1]
-                    ret[i + 1] = current
-                    swapped = true
-                }
-            }
-            if (!swapped) break
-        }
-        return ret
+        const position = bot.entity.position
+        return Object.values(bot.entities)
+            .filter(pred)
+            .map(entity => ({
+                entity,
+                distance: position.distanceSquared(entity.position)
+            }))
+            .sort((a, b) => a.distance - b.distance)
+            .map(entry => entry.entity)
     }
 
     bot.placeNearby = async (item, range=2) => {
@@ -126,11 +121,6 @@ export const plugin = (bot) => {
         return false
     }
 
-    bot.isInWater = () => {
-        const block = bot.blockAt(bot.entity.position);
-        return block && block.name === 'water';
-    }
-
     bot.canSeeMob = (mob) => {
         const eyePosition = bot.entity.position.offset(0, bot.entity.eyeHeight, 0)
         const targetPosition = mob.position.offset(0, (mob.height || 1) / 2, 0)
@@ -139,16 +129,10 @@ export const plugin = (bot) => {
         return bot.world.raycast(eyePosition, direction.normalize(), distance) == null
     }
 
-    var tP = 0
-
     bot.on("physicsTick", () => {
-        if (!bot.pathfinder.goal && bot.isInWater()) bot.setControlState("jump", true)
-        if (tP >= 100 && !bot.pathfinder.isMining()) {
-            bot.pathfinder.stop()
-            tP = 0
-        }
+        if (bot.entity.isInWater) bot.setControlState("jump", true)
+
         if (task) task.tick()
-        tP++
     })
 
 }

@@ -12,6 +12,7 @@
     "mineflayer": "github:GenerelSchwerz/mineflayer#dev",
     "mineflayer-auto-eat": "^5.0.3",
     "mineflayer-crafting-util": "^0.5.0",
-    "mineflayer-pathfinder": "^2.4.5"
+    "mineflayer-pathfinder": "^2.4.5",
+    "vec3": "^0.2.0"
   }
 }
