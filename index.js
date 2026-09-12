@@ -22,7 +22,6 @@ export const plugin = (bot) => {
     const movements = new Movements(bot)
     movements.scafoldingBlocks = [bot.registry.itemsByName.dirt.id]
     movements.allowSprinting = true
-    movements.allowFreeMotion = true
     bot.pathfinder.setMovements(movements)
     bot.loadPlugin(craftingUtil())
 
@@ -128,6 +127,11 @@ export const plugin = (bot) => {
         const distance = eyePosition.distanceTo(targetPosition)
         return bot.world.raycast(eyePosition, direction.normalize(), distance) == null
     }
+
+    bot.on("death", () => {
+        console.error("Death!")
+        if (task) task.stop()
+    })
 
     bot.on("physicsTick", () => {
         if (bot.entity.isInWater) bot.setControlState("jump", true)

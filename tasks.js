@@ -57,8 +57,13 @@ export function mainTask(bot) {
 
         search() {
             attackTask.search()
-            itemsTask.search()
-            bot.survival.task?.search?.()
+            if (attackTask.isFinished()) {
+                itemsTask.search()
+                if (itemsTask.isFinished()) {
+                    bot.survival.task?.search?.()
+                }
+            }
+            
         }
 
         chooseTask() {
@@ -85,7 +90,7 @@ export function mainTask(bot) {
 
         // interruptTask = null if the task stopped cleanly
         onStop(interruptTask) {
-            
+            if (currentTask) currentTask.stop()
         };
 
         isFinished() {return false}
@@ -159,9 +164,7 @@ export function huntTask(bot, count) {
 export function earlyProgressionTask(bot) {
     var getStoneTools = getStoneToolsTask(bot)
     var hunt = huntTask(bot, 24)
-    var digDirt = digBlockTask(bot, isDirt, 16, "Dirt")
-    var digWood = digBlockTask(bot, isLog, 6, "Wood")
-    const tasks = [getStoneTools, hunt, digDirt, digWood]
+    const tasks = [getStoneTools, hunt]
 
     class EarlyProgressionTask extends Task {
         onStart() {
@@ -169,10 +172,8 @@ export function earlyProgressionTask(bot) {
         };
 
         search() {
-            hunt.search()
+            if (bot.inventory.sword()) hunt.search()
             getStoneTools.search()
-            digDirt.search()
-            digWood.search()
         }
 
         distanceTo() {
@@ -299,7 +300,7 @@ export function attackMobsTask(bot) {
 }
 
 export function placeCraftingTableTask(bot) {
-    var digWoodTask = digBlockTask(bot, isLog, 1, "Wood")
+    var digWoodTask = digBlockTask(bot, isLog, 6, "Wood")
     var craftingTable = null
     var locked = false
     const reach = 3
@@ -311,17 +312,19 @@ export function placeCraftingTableTask(bot) {
         distanceTo() {
             if (locked) return 0
             if (craftingTable) return craftingTable.position.distanceTo(bot.entity.position)
+            if (bot.inventory.getCount(isLog) == 0) return digWoodTask.distanceTo()
             return Infinity
         }
 
         search() {
-            digWoodTask.search()
+            if (bot.inventory.getCount(isLog) == 0) digWoodTask.search()
             const p = bot.findBlocks({matching:b=>b.displayName == "Crafting Table", maxDistance:32}).sort((a, b) => {
                 const distanceA = bot.entity.position.distanceTo(a)
                 const distanceB = bot.entity.position.distanceTo(b)
                 return distanceA - distanceB // Closest first. Flip to (distanceB - distanceA) for farthest first.
             })[0]
             if (p) craftingTable = bot.blockAt(p)
+            else craftingTable = null
         }
 
         getCraftingTable() {
@@ -424,10 +427,10 @@ export function getStoneToolsTask(bot) {
         }
 
         search() {
-            digWoodTask.search()
-            woodPickTask.search()
-            digStoneTask.search()
-            craftingTableTask.search()
+            if (!digWoodTask.isFinished()) digWoodTask.search()
+            if (!woodPickTask.isFinished()) woodPickTask.search()
+            else if (!digStoneTask.isFinished()) digStoneTask.search()
+            if (needsCraftingTable) craftingTableTask.search()
         }
 
         onTick() {
@@ -437,16 +440,16 @@ export function getStoneToolsTask(bot) {
                 return craftingTableTask
             }
 
-            if (digWoodTask.shouldContinue()) return digWoodTask
             if (woodPickTask.shouldContinue()) return woodPickTask
             else if (digStoneTask.shouldContinue()) return digStoneTask
+            else if (digWoodTask.shouldContinue()) return digWoodTask
 
             const items = bot.registry.itemsByName
 
             const ids = [items.stone_pickaxe.id, items.stone_axe.id, items.stone_shovel.id, items.stone_sword.id]
             const tools = ["pickaxe", "axe", "shovel", "sword"]
 
-            locked = false
+            locked = true
             ;(async () => {
                 for (let i = 0; i < ids.length; i++) {
                     const tool = bot.inventory[tools[i]]()
@@ -459,24 +462,19 @@ export function getStoneToolsTask(bot) {
                     if (plan.status == "complete") {
                         if (!craftingTableTask.isFinished()) return true
 
-                        locked = true
                         try {
                             await bot.craftItem(id, 1, craftingTableTask.getCraftingTable())
                         } catch(e) {
                             console.error("GetStoneToolsTask:", e)
                         }
-                        locked = false
                     }
                 }
                 return false
-            })().then(b => {
-                locked = false
-                needsCraftingTable = b
-            })
+            })().then(b => needsCraftingTable = b).catch(e => {}).finally(() => locked = false)
 
             if (!digWoodTask.isFinished()) return digWoodTask
             if (!woodPickTask.isFinished()) return woodPickTask
-            if (!digStoneTask.isFinished()) return digStoneTask
+            else if (!digStoneTask.isFinished()) return digStoneTask
 
             return null
         };
@@ -502,6 +500,7 @@ export function getWoodPickTask(bot) {
     var diggingWoodTask = digBlockTask(bot, isLog, 6, "Wood")
     var craftingTableTask = placeCraftingTableTask(bot)
     var locked = false
+    var crashed = false
     var needsCraftingTable = false
     class GetWoodPickTask extends Task {
 
@@ -510,8 +509,8 @@ export function getWoodPickTask(bot) {
         }
 
         search() {
-            diggingWoodTask.search()
-            craftingTableTask.search()
+            if (!diggingWoodTask.isFinished()) diggingWoodTask.search()
+            if (needsCraftingTable) craftingTableTask.search()
         }
 
         distanceTo() {
@@ -538,7 +537,7 @@ export function getWoodPickTask(bot) {
                 locked = true
                 bot.craftItem(id, 1, craftingTableTask.getCraftingTable())
                     .then(v => locked = false)
-                    .catch(e => {console.error("GetPickTask: ", e); locked = false})
+                    .catch(e => {console.error("GetPickTask: ", e); locked = false; crashed = true})
 
                 return null
             }
@@ -548,7 +547,11 @@ export function getWoodPickTask(bot) {
         };
 
         isFinished() {
-            return bot.inventory.pickaxe() != null
+            if (crashed) {
+                crashed = false
+                return true
+            }
+            return bot.inventory.pickaxe() != null 
         }
 
         // interruptTask = null if the task stopped cleanly
@@ -567,7 +570,7 @@ export function collectItemsTask(bot) {
     const range = 10
     class CollectItemsTask extends Task {
         constructor() {
-            super(2)
+            super()
         }
 
         search() {
