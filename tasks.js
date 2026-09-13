@@ -47,7 +47,9 @@ function getClosestTask(tasks) {
 export function mainTask(bot) {
     let attackTask = attackMobsTask(bot)
     let itemsTask = collectItemsTask(bot)
+    // huntAndCookTask
     let currentTask = null
+    let currentHierarchy = ""
     let t = 0
 
     class MainTask extends Task {
@@ -81,7 +83,12 @@ export function mainTask(bot) {
                 currentTask = task
             }
             if (currentTask) {
-                console.log(currentTask.getHierarchy())
+                const newHierarchy = currentTask.getHierarchy()
+                if (newHierarchy != currentHierarchy) {
+                    t = 0
+                    currentHierarchy = newHierarchy
+                }
+                console.log(t+" | "+currentHierarchy)
                 currentTask.tick()
             }
             t++
@@ -90,7 +97,7 @@ export function mainTask(bot) {
 
         // interruptTask = null if the task stopped cleanly
         onStop(interruptTask) {
-            if (currentTask) currentTask.stop()
+            t = 0
         };
 
         isFinished() {return false}
@@ -99,6 +106,25 @@ export function mainTask(bot) {
     }
 
     return new MainTask()
+}
+
+export function placeFurnaceTask(bot) {
+
+}
+
+export function cookTask(bot, pred, count) {
+    const placeFurnace = placeFurnaceTask(bot)
+}
+
+export function collectIronTask(bot, count) {
+    const pred = i=>i.displayName == "Raw Iron" || i.displayName.includes("Iron Ore")
+    const digIron = mineNearSurfaceTask(bot, pred, count, "Iron")
+    const cook = cookTask(bot, pred, count)
+}
+
+export function huntAndCookTask(bot, count) {
+    const hunt = huntTask(bot, count)
+    const cook = cookTask(bot, isGoodRawFood, count)
 }
 
 export function huntTask(bot, count) {
@@ -148,7 +174,9 @@ export function huntTask(bot, count) {
             entity = null
         };
 
-        isFinished() {return entity == null || !bot.inventory.sword() || bot.inventory.getCount(i => isGoodRawFood(i) || isGoodCookedFood(i)) >= count}
+        shouldSearch() {return bot.inventory.sword() && bot.inventory.getCount(i => isGoodRawFood(i) || isGoodCookedFood(i)) < count}
+
+        isFinished() {return entity == null || !this.shouldSearch()}
 
         isEqual(other) {return other instanceof HuntTask && other.count == count};
 
@@ -159,46 +187,6 @@ export function huntTask(bot, count) {
     }
 
     return new HuntTask()
-}
-
-export function earlyProgressionTask(bot) {
-    var getStoneTools = getStoneToolsTask(bot)
-    var hunt = huntTask(bot, 24)
-    const tasks = [getStoneTools, hunt]
-
-    class EarlyProgressionTask extends Task {
-        onStart() {
-
-        };
-
-        search() {
-            if (bot.inventory.sword()) hunt.search()
-            getStoneTools.search()
-        }
-
-        distanceTo() {
-            return getClosestDist(tasks)
-        }
-
-        onTick() {
-            const task = getClosestTask(tasks) 
-            if (!task && !getStoneTools.isFinished()) return getStoneTools
-            return task
-        };
-
-        // interruptTask = null if the task stopped cleanly
-        onStop(interruptTask) {
-            
-        };
-
-        isFinished() {
-            return getStoneTools.isFinished() && hunt.isFinished()
-        }
-
-        isEqual(other) {return other instanceof EarlyProgressionTask};
-    }
-
-    return new EarlyProgressionTask()
 }
 
 export function attackMobsTask(bot) {
@@ -312,12 +300,12 @@ export function placeCraftingTableTask(bot) {
         distanceTo() {
             if (locked) return 0
             if (craftingTable) return craftingTable.position.distanceTo(bot.entity.position)
-            if (bot.inventory.getCount(isLog) == 0) return digWoodTask.distanceTo()
+            if (!digWoodTask.isFinished()) return digWoodTask.distanceTo()
             return Infinity
         }
 
         search() {
-            if (bot.inventory.getCount(isLog) == 0) digWoodTask.search()
+            if (!digWoodTask.isFinished()) digWoodTask.search()
             const p = bot.findBlocks({matching:b=>b.displayName == "Crafting Table", maxDistance:32}).sort((a, b) => {
                 const distanceA = bot.entity.position.distanceTo(a)
                 const distanceB = bot.entity.position.distanceTo(b)
@@ -405,7 +393,6 @@ export function mineNearSurfaceTask(bot, pred, count, dStr) {
 
 export function getStoneToolsTask(bot) {
     var digWoodTask = digBlockTask(bot, isLog, 6, "Wood")
-    var woodPickTask = getWoodPickTask(bot)
     var digStoneTask = mineNearSurfaceTask(bot, isStone, 20, "Stone")
     var craftingTableTask = placeCraftingTableTask(bot)
     var needsCraftingTable = false
@@ -420,16 +407,14 @@ export function getStoneToolsTask(bot) {
             if (locked) return 0
             const tasks = []
             if (!digWoodTask.isFinished()) tasks.push(digWoodTask)
-            if (!woodPickTask.isFinished()) tasks.push(woodPickTask)
-            else if (!digStoneTask.isFinished()) tasks.push(digStoneTask)
+            if (!digStoneTask.isFinished()) tasks.push(digStoneTask)
             if (needsCraftingTable) tasks.push(craftingTableTask)
             return getClosestDist(tasks)
         }
 
         search() {
-            if (!digWoodTask.isFinished()) digWoodTask.search()
-            if (!woodPickTask.isFinished()) woodPickTask.search()
-            else if (!digStoneTask.isFinished()) digStoneTask.search()
+            if (digWoodTask.shouldSearch()) digWoodTask.search()
+            if (digStoneTask.shouldSearch()) digStoneTask.search()
             if (needsCraftingTable) craftingTableTask.search()
         }
 
@@ -440,8 +425,7 @@ export function getStoneToolsTask(bot) {
                 return craftingTableTask
             }
 
-            if (woodPickTask.shouldContinue()) return woodPickTask
-            else if (digStoneTask.shouldContinue()) return digStoneTask
+            if (digStoneTask.shouldContinue()) return digStoneTask
             else if (digWoodTask.shouldContinue()) return digWoodTask
 
             const items = bot.registry.itemsByName
@@ -473,8 +457,7 @@ export function getStoneToolsTask(bot) {
             })().then(b => needsCraftingTable = b).catch(e => {}).finally(() => locked = false)
 
             if (!digWoodTask.isFinished()) return digWoodTask
-            if (!woodPickTask.isFinished()) return woodPickTask
-            else if (!digStoneTask.isFinished()) return digStoneTask
+            if (!digStoneTask.isFinished()) return digStoneTask
 
             return null
         };
@@ -509,7 +492,7 @@ export function getWoodPickTask(bot) {
         }
 
         search() {
-            if (!diggingWoodTask.isFinished()) diggingWoodTask.search()
+            if (diggingWoodTask.shouldSearch()) diggingWoodTask.search()
             if (needsCraftingTable) craftingTableTask.search()
         }
 
@@ -547,16 +530,13 @@ export function getWoodPickTask(bot) {
         };
 
         isFinished() {
-            if (crashed) {
-                crashed = false
-                return true
-            }
+            if (crashed) return true
             return bot.inventory.pickaxe() != null 
         }
 
         // interruptTask = null if the task stopped cleanly
         onStop(interruptTask) {
-
+            crashed = false
         };
 
         isEqual(other) {return other instanceof GetWoodPickTask};
@@ -604,10 +584,24 @@ export function collectItemsTask(bot) {
     return new CollectItemsTask()
 }
 
+export function getPickByMiningLevel(bot, level) {
+    const task = (() => {
+        if (!level) return null
+        if (level == 1) return getWoodPickTask(bot)
+        if (level == 2) return getStoneToolsTask(bot)
+        return null
+    })()
+
+    if (task) task.tier = level
+
+    return task
+}
+
 export function digBlockTask(bot, pred=(item)=>false, count, dStr="") {
     var blocks = []
     var currentCount = null
     var locked = false
+    var pickaxeTask = null
     const reach = 3
     const wander = new goals.GoalNearXZ(30000000, 30000000, 0)
     var t = 0
@@ -622,15 +616,24 @@ export function digBlockTask(bot, pred=(item)=>false, count, dStr="") {
         }
 
         search() {
+            if (pickaxeTask && pickaxeTask.shouldSearch()) pickaxeTask.search()
+
             blocks = bot.findBlocks({matching:pred, maxDistance:32}).sort((a, b) => {
                 const distanceA = bot.entity.position.distanceTo(a)
                 const distanceB = bot.entity.position.distanceTo(b)
                 return distanceA - distanceB // Closest first. Flip to (distanceB - distanceA) for farthest first.
             }).slice(0, count-currentCount)
+
+            if (blocks[0]) {
+                const b = bot.blockAt(blocks[0])
+                const harvestTools = b ? bot.registry.blocksArray[b.type].harvestTools : [0]
+                const lowestPossibleTier = harvestTools ? Math.min(...Object.keys(harvestTools).map(type => itemTier(bot.registry.itemsArray[type]))) : 0
+                if (!pickaxeTask || lowestPossibleTier != pickaxeTask.tier)
+                    pickaxeTask = getPickByMiningLevel(bot, lowestPossibleTier)
+            }
         }   
 
         distanceTo() {
-            if (locked) return 0
             return blocks.length ? bot.entity.position.distanceTo(blocks[0]) : Infinity
         }
 
@@ -654,6 +657,9 @@ export function digBlockTask(bot, pred=(item)=>false, count, dStr="") {
 
         onTick() {
             t++
+
+            if (pickaxeTask && !pickaxeTask.isFinished()) return pickaxeTask
+            pickaxeTask = null
 
             currentCount = bot.inventory.getCount(pred)
             if (locked) {
@@ -733,6 +739,8 @@ class Task {
     debugString() {return ""}
     
     search() {}
+
+    shouldSearch() {return !this.isFinished()}
 
     sub = null;
 
@@ -865,10 +873,11 @@ class Task {
     }
 
     getHierarchy() {
-        const hierarchy = [this.constructor.name]
-        let task = this.sub
+        const hierarchy = []
+        let task = this
         while (task != null) {
-            hierarchy.push(task.constructor.name+" "+task.debugString())
+            const debug = task.debugString()
+            hierarchy.push(task.constructor.name+(debug ? " "+debug : ""))
             task = task.sub
         }
         return hierarchy.join(" -> ")

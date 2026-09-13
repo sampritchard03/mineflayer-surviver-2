@@ -1,4 +1,4 @@
-import {digBlockTask, placeCraftingTableTask, collectItemsTask, getWoodPickTask, getStoneToolsTask, attackMobsTask, earlyProgressionTask, mainTask} from "./tasks.js"
+import {digBlockTask, placeCraftingTableTask, collectItemsTask, getWoodPickTask, getStoneToolsTask, attackMobsTask, mainTask, collectIronTask, huntAndCookTask, huntTask, mineNearSurfaceTask, getPickByMiningLevel} from "./tasks.js"
 import { itemTier } from "./utils.js"
 import pfr from "mineflayer-pathfinder"
 const {pathfinder, goals, Movements} = pfr
@@ -13,8 +13,12 @@ export const tasks = {
     getWoodPickTask,
     getStoneToolsTask,
     attackMobsTask,
-    earlyProgressionTask,
-    mainTask
+    mainTask,
+    collectIronTask,
+    huntAndCookTask,
+    huntTask,
+    mineNearSurfaceTask,
+    getPickByMiningLevel
 }
 
 export const plugin = (bot) => {
@@ -25,7 +29,7 @@ export const plugin = (bot) => {
     bot.pathfinder.setMovements(movements)
     bot.loadPlugin(craftingUtil())
 
-    const task = mainTask(bot)
+    var task = mainTask(bot)
 
     bot.survival = {
         task: null,
@@ -129,8 +133,11 @@ export const plugin = (bot) => {
     }
 
     bot.on("death", () => {
-        console.error("Death!")
-        if (task) task.stop()
+        console.error("Death! - Task stopped.")
+        bot.survival.task?.stop()
+        bot.survival.task = null
+        task.stop()
+        task = mainTask(bot)
     })
 
     bot.on("physicsTick", () => {
